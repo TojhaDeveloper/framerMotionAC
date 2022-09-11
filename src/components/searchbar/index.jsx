@@ -1,9 +1,15 @@
-import React from "react";
+import React, { useCallback, useEffect } from "react";
 import styled from "styled-components";
 import { IoClose, IoSearch } from "react-icons/io5";
 import { useState } from "react";
+import { useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useClickOutside, useDebounceHook } from "../hooks";
+import MoonLoader from "react-spinners/MoonLoader";
+import axios from "axios";
+import { TVShow } from "../tvshow/tvShow";
 
-const SearchBarContainer = styled.div`
+const SearchBarContainer = styled(motion.div)`
   display: flex;
   flex-direction: column;
   width: 34em;
@@ -53,7 +59,7 @@ const SearchIcon = styled.span`
   vertical-align: middle;
 `;
 
-const CloseIcon = styled.span`
+const CloseIcon = styled(motion.span)`
   color: #bebebe;
   font-size: 23px;
   margin-right: 40px;
@@ -65,26 +71,170 @@ const CloseIcon = styled.span`
     color: #dfdfdf;
   }
 `;
-const SearchBar = () => {
-    const [isExpanded, setExpanded] = useState(false);
 
-    const expandContainer = ()=> {
-        setExpanded(true)
+const containerVariants = {
+  expanded: {
+    height: "20em",
+  },
+  collapsed: {
+    height: "3.8em",
+  },
+};
+
+const SearchContent = styled.div`
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 1em;
+  overflow: auto;
+`;
+const LineSeperator = styled.span`
+  display: flex;
+  min-width: 100%;
+  min-height: 2px;
+  background-color: #d8d8d878;
+`;
+
+const LoadingSpinnerDiv = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+`;
+
+const WarningMessage = styled.span`
+  font-size: 14px;
+  color: #a1a1a1;
+  display: flex;
+  align-self: center;
+  justify-self: center;
+`;
+const containerTransition = { type: "spring", damping: 22, stiffness: 150 };
+const SearchBar = () => {
+  const [isExpanded, setExpanded] = useState(false);
+  const [isLoading, setLoading] = useState(false);
+  const [noTvShows, setNoTvShows] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const isEmpty = !results || results.length === 0;
+  const ref = useRef();
+  const inputRef = useRef();
+
+  const expandContainer = () => {
+    setExpanded(true);
+  };
+  const collapseContainer = () => {
+    setExpanded(false);
+    if (inputRef?.current) {
+      inputRef.current.value = "";
     }
-    const collapseContainer = ()=> {
-        setExpanded(false)
+    setSearchQuery("");
+    setResults([]);
+    setNoTvShows(false);
+  };
+
+  const handleChange = (e) => {
+    e.preventDefault();
+    if (e.target.value.trim() === "") {
+      setNoTvShows(false);
     }
+    setSearchQuery(e.target.value);
+  };
+
+  useClickOutside(ref, useCallback(collapseContainer, []));
+
+  const debouncedSearchQuery = useDebounceHook(searchQuery, 500);
+
+  useEffect(() => {
+    const fetchMovies = async () => {
+      if (!debouncedSearchQuery || debouncedSearchQuery.trim() === "") {
+        return;
+      }
+      const URL = `https://api.tvmaze.com/search/shows?q=${debouncedSearchQuery}`;
+      const encodedURL = encodeURI(URL);
+      setLoading(true);
+      try {
+        const response = await axios.get(encodedURL);
+        if (response) {
+          if (response.data && response.data.length === 0) {
+            setNoTvShows(true);
+          }
+          console.log("DATA: ", response.data);
+          setResults(response.data);
+        }
+      } catch (err) {
+        console.log(err);
+      }
+      setLoading(false);
+    };
+
+    fetchMovies();
+  }, [debouncedSearchQuery]);
   return (
-    <SearchBarContainer>
+    <SearchBarContainer
+      ref={ref}
+      animate={isExpanded ? "expanded" : "collapsed"}
+      variants={containerVariants}
+      transition={containerTransition}
+    >
       <SearchInputContainer>
         <SearchIcon>
           <IoSearch />
         </SearchIcon>
-        <SearchInput placeholder="Search for Shows/Movies" onFocus={expandContainer}/>
-        <CloseIcon>
-          <IoClose />
-        </CloseIcon>
+        <SearchInput
+          ref={inputRef}
+          placeholder="Search for Shows/Movies"
+          onFocus={expandContainer}
+          value={searchQuery}
+          onChange={handleChange}
+        />
+        <AnimatePresence>
+          {isExpanded && (
+            <CloseIcon
+              key="close-icon"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opcaity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={collapseContainer}
+            >
+              <IoClose />
+            </CloseIcon>
+          )}
+        </AnimatePresence>
       </SearchInputContainer>
+      <LineSeperator />
+      <SearchContent>
+        {isLoading && (
+          <LoadingSpinnerDiv>
+            <MoonLoader color="#000" size={20} loading />
+          </LoadingSpinnerDiv>
+        )}
+        {!isLoading && isEmpty && !noTvShows && (
+          <LoadingSpinnerDiv>
+            <WarningMessage>Start typing to Search</WarningMessage>
+          </LoadingSpinnerDiv>
+        )}
+        {!isLoading && noTvShows && (
+          <LoadingSpinnerDiv>
+            <WarningMessage>No Tv/Movies Found</WarningMessage>
+          </LoadingSpinnerDiv>
+        )}
+        {!isLoading && !isEmpty && (
+          <>
+            {results.map(({ show: d }) => (
+              <TVShow
+                key={d.id}
+                thumbNail={d.image?.medium}
+                name={d.name}
+                rating={d.rating?.average}
+              />
+            ))}
+          </>
+        )}
+      </SearchContent>
     </SearchBarContainer>
   );
 };
